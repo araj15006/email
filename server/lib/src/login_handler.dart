@@ -58,11 +58,36 @@ Handler loginHandler(SessionStore sessionStore) {
       smtpPort = endpoint.port;
     }
 
-    // [Read-Only Mode Fix]
-    // Render free tier blocks outbound connections on Port 465 (SMTP).
-    // To allow the user to log in and read their emails (via IMAP on 993), 
-    // we bypass the SMTP verification completely.
-    final result = SmtpVerifyResult.success();
+    final SmtpVerifyResult result;
+    try {
+      result = await verifySmtpCredentials(
+        host: smtpHost,
+        port: smtpPort,
+        email: email,
+        password: password,
+      );
+    } catch (_) {
+      return _json(500, {
+        'success': false,
+        'errorType': 'server_error',
+        'message': 'Unexpected error while verifying credentials.',
+      });
+    }
+
+    if (!result.isSuccess) {
+      final errorType = result.errorType!;
+      final status = switch (errorType) {
+        SmtpVerifyErrorType.invalidCredentials => 401,
+        SmtpVerifyErrorType.connectionFailed => 502,
+        SmtpVerifyErrorType.serverError => 500,
+      };
+
+      return _json(status, {
+        'success': false,
+        'errorType': _errorTypeToWire(errorType),
+        'message': result.message,
+      });
+    }
 
     // SMTP already proved the credentials are correct. IMAP is resolved and
     // probed best-effort from here on — a bad/missing IMAP host must never
